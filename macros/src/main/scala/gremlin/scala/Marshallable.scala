@@ -1,8 +1,9 @@
 package gremlin.scala
 
 import scala.language.experimental.macros
-import scala.reflect.macros.blackbox.Context
+import scala.reflect.macros.Context
 
+import macrocompat.bundle
 
 trait Marshallable[T] {
   def fromCC(t: T): (String, Map[String, Any])
@@ -10,6 +11,7 @@ trait Marshallable[T] {
   def toCC(label: String, valueMap: Map[String, Any]): T
 }
 
+// @bundle
 object Marshallable {
   implicit def materializeMappable[T]: Marshallable[T] =
   macro materializeMappableImpl[T]
@@ -19,21 +21,26 @@ object Marshallable {
     val tpe = weakTypeOf[T]
     val companion = tpe.typeSymbol.companionSymbol
 
+
+    val nn : MethodSymbol = ???
+
+    val dd = tpe.declaration(nn.name)
+
     val (labelParam, toMapParams, fromMapParams) = tpe.declarations
       .foldLeft[(Tree, Seq[Tree], Seq[Tree])]((q"""t.getClass.getSimpleName""", Seq.empty, Seq.empty)) {
       case ((labelParam, toMapParams, fromMapParams), field: MethodSymbol) if field.isCaseAccessor =>
         val name = field.name
         val decoded = name.decoded
-        val returnType = tpe.declaration(name).typeSignature.resultType
+        val returnType = tpe.declaration(name).typeSignature
 
         if (field.annotations map (_.tpe) contains weakTypeOf[label]) {
           assert(returnType =:= weakTypeOf[String], "The label should be of type String")
-          (q"t.$name",
+          (q"t.${name.toTermName}",
             toMapParams,
             fromMapParams :+ q"label")
         } else {
           (labelParam,
-            toMapParams :+ q"$decoded -> t.$name",
+            toMapParams :+ q"$decoded -> t.${name.toTermName}",
             fromMapParams :+ q"valueMap($decoded).asInstanceOf[$returnType]")
         }
       case (params, _) => params

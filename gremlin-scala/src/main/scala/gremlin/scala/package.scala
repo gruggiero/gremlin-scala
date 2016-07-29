@@ -101,11 +101,11 @@ package object scala {
     def -->(right: ScalaVertex) = SemiDoubleEdge(right, label)
   }
 
-  implicit class SemiEdgePropertiesFunctions(labelProperties: (String, Map[String, Any])) {
-    private val (label, properties) = labelProperties
+  // implicit class SemiEdgePropertiesFunctions(labelProperties: (String, Map[String, Any])) {
+  //   private val (label, properties) = labelProperties
 
-    def ---(from: ScalaVertex) = SemiEdge(from, label, properties)
-  }
+  //   def ---(from: ScalaVertex) = SemiEdge(from, label, properties)
+  // }
 
   implicit class SemiEdgeCcFunctions[T <: Product : Marshallable](cc: T) {
     def ---(from: ScalaVertex) = {
