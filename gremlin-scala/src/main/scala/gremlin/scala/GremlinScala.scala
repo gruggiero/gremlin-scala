@@ -1,23 +1,30 @@
 package gremlin.scala
 
-import java.lang.{Long ⇒ JLong, Double => JDouble}
-import java.util.function.{Predicate ⇒ JPredicate, Consumer ⇒ JConsumer, BiPredicate, Supplier}
+import java.lang.{Long ⇒ JLong, Double ⇒ JDouble}
+import java.util.function.{Predicate ⇒ JPredicate, Consumer ⇒ JConsumer, BiFunction ⇒ JBiFunction, Function => JFunction}
 import java.util.{Comparator, List ⇒ JList, Map ⇒ JMap, Collection ⇒ JCollection, Iterator ⇒ JIterator}
+import java.util.stream.{Stream ⇒ JStream}
 
 import collection.JavaConversions._
-import collection.mutable
 import org.apache.tinkerpop.gremlin.process.traversal.Order
 import org.apache.tinkerpop.gremlin.process.traversal.Pop
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__
+import org.apache.tinkerpop.gremlin.process.traversal.step.util.{BulkSet, Tree}
+import org.apache.tinkerpop.gremlin.process.traversal.util.TraversalExplanation
 import org.apache.tinkerpop.gremlin.process.traversal.{P, Path, Scope, Traversal}
 import org.apache.tinkerpop.gremlin.structure.{T, Direction}
 import shapeless.{HList, HNil, ::}
 import shapeless.ops.hlist.Prepend
 import scala.language.existentials
+// import scala.reflect.runtime.{universe => ru}
+// import StepLabel.{combineLabelWithValue, GetLabelName}
+import scala.collection.immutable
 
 case class GremlinScala[End, Labels <: HList](traversal: GraphTraversal[_, End]) {
-  def toStream(): java.util.stream.Stream[End] = traversal.toStream
+  def toStream(): JStream[End] = traversal.toStream
+
+  def toMap[A, B](implicit ev: End <:< (A, B)): immutable.Map[A,B] = toList.toMap
 
   def toList(): List[End] = traversal.toList.toList
 
@@ -26,6 +33,11 @@ case class GremlinScala[End, Labels <: HList](traversal: GraphTraversal[_, End])
   def head(): End = toList.head
 
   def headOption(): Option[End] = toList.headOption
+
+  def explain(): TraversalExplanation = traversal.explain()
+
+  def exists(): Boolean = headOption.isDefined
+  def notExists(): Boolean = !exists()
 
   // execute pipeline - applies all side effects
   def iterate() = {
@@ -79,7 +91,7 @@ case class GremlinScala[End, Labels <: HList](traversal: GraphTraversal[_, End])
 
   def path() = GremlinScala[Path, Labels](traversal.path())
 
-  // like path, but type safe and contains only the labelled steps - see `as` step and `LabelledPathSpec` 
+  // like path, but type safe and contains only the labelled steps - see `as` step and `LabelledPathSpec`
   def labelledPath() = GremlinScala[Labels, Labels](traversal.asAdmin.addStep(new LabelledPathStep[End, Labels](traversal)))
 
   def select[A, B](selectKey: String) = GremlinScala[B, Labels](traversal.select(selectKey))
@@ -110,7 +122,7 @@ case class GremlinScala[End, Labels <: HList](traversal: GraphTraversal[_, End])
 
   def dedup(scope: Scope, dedupLabels: String*) = GremlinScala[End, Labels](traversal.dedup(scope, dedupLabels: _*))
 
-  // keeps element on a probabilistic base - probability range: 0.0 (keep none) - 1.0 - keep all 
+  // keeps element on a probabilistic base - probability range: 0.0 (keep none) - 1.0 - keep all
   def coin(probability: Double) = GremlinScala[End, Labels](traversal.coin(probability))
 
   def range(low: Int, high: Int) = GremlinScala[End, Labels](traversal.range(low, high))
@@ -128,7 +140,7 @@ case class GremlinScala[End, Labels <: HList](traversal: GraphTraversal[_, End])
 
   def tail(scope: Scope, limit: Long) = GremlinScala[End, Labels](traversal.tail(scope, limit))
 
-  // labels the current step and preserves the type - see `labelledPath` steps 
+  // labels the current step and preserves the type - see `labelledPath` steps
   def as(name: String)(implicit p: Prepend[Labels, End :: HNil]) = GremlinScala[End, p.Out](traversal.as(name))
 
   def label() = GremlinScala[String, Labels](traversal.label())
@@ -161,6 +173,15 @@ case class GremlinScala[End, Labels <: HList](traversal: GraphTraversal[_, End])
   def group[A, B]() = GremlinScala[JMap[A, B], Labels](traversal.group())
 
   def group(sideEffectKey: String) = GremlinScala[End, Labels](traversal.group(sideEffectKey))
+
+  def groupBy[A <: AnyRef](byFun: End ⇒ A): GremlinScala[JMap[A, JCollection[End]], Labels] =
+      GremlinScala[JMap[A, JCollection[End]], Labels](traversal.group().by(byFun: JFunction[End, AnyRef]))
+
+  def groupBy[A <: AnyRef, B](byFun: End ⇒ A, valueFun: End ⇒ B): GremlinScala[Map[A, Iterable[B]], Labels] =
+    GremlinScala[JMap[A, JCollection[End]], Labels](
+      traversal.group().by(byFun: JFunction[End, AnyRef])
+    ).map(_.mapValues(_ map valueFun).toMap)
+
 
   def groupCount[A]() = GremlinScala[JMap[A, JLong], Labels](traversal.groupCount())
 
@@ -212,7 +233,7 @@ case class GremlinScala[End, Labels <: HList](traversal: GraphTraversal[_, End])
   def byTraversal[A](byTraversal: GremlinScala[End, HNil] ⇒ GremlinScala[A, _]) =
     GremlinScala[End, Labels](traversal.by(byTraversal(start).traversal))
 
-  //TODO: rename to by 
+  //TODO: rename to by
   def byTraversal[A](byTraversal: GremlinScala[End, HNil] ⇒ GremlinScala[A, _], order: Order) =
     GremlinScala[End, Labels](traversal.by(byTraversal(start).traversal, order))
 
@@ -296,6 +317,8 @@ case class GremlinScala[End, Labels <: HList](traversal: GraphTraversal[_, End])
   protected def toJavaList[A](i: Iterable[A]): JList[A] = i.toList
 
   protected def start[A] = GremlinScala[A, HNil](__.start[A]())
+
+  // protected def start[A] = __[A]()
 }
 
 class GremlinElementSteps[End <: Element, Labels <: HList](gremlinScala: GremlinScala[End, Labels])
